@@ -13,7 +13,7 @@ import { flagTexture, pitchTexture, zincTexture } from "./textures";
 const NAVY = "#1d3a6e";
 const CREAM = "#efe7d6";
 
-function Pick({ id, children }: { id: PlaceId; children: ReactNode }) {
+export function Pick({ id, children }: { id: PlaceId; children: ReactNode }) {
   return (
     <group
       onClick={(e: ThreeEvent<MouseEvent>) => {
@@ -155,44 +155,6 @@ function Buka() {
         ))}
         <Cyl p={[0, 0.65, 0]} r={[0.6, 0.45]} h={0.7} c="#1f1f1f" rough={0.4} />
       </group>
-    </Pick>
-  );
-}
-
-function Hall() {
-  const laundry = useMemo(() => {
-    const colors = ["#b23a48", "#f4f4f2", "#2f8f8a", "#c6882a", "#6d4aa8", "#1d3a6e", "#e8892b"];
-    const list: { p: [number, number, number]; c: string }[] = [];
-    let k = 0;
-    for (let f = 1; f <= 3; f++) {
-      for (let z = 15.5; z < 31; z += 2.1 + ((k * 7) % 5) * 0.2) {
-        if ((k * 13) % 3 !== 0) list.push({ p: [-20.95, f * 2.6 + 0.25, z], c: colors[k % colors.length] });
-        k++;
-      }
-    }
-    return list;
-  }, []);
-  return (
-    <Pick id="hall">
-      <B p={[-26, 1.3, 23]} s={[8, 2.6, 18]} c="#b5654a" />
-      <B p={[-26, 6.5, 23]} s={[8, 7.8, 18]} c="#f1e6cf" />
-      <Windows x0={-30} x1={-22} z0={14} z1={32} y0={0} floors={4} floorH={2.6} colsZ={3} colsX={10} w={0.8} h={1.25} />
-      {[1, 2, 3].map((f) => (
-        <group key={f}>
-          <B p={[-21.5, f * 2.6, 23]} s={[1, 0.18, 18]} c="#e3d6bb" />
-          <B p={[-21.05, f * 2.6 + 0.5, 23]} s={[0.1, 0.85, 18]} c={NAVY} r={0.6} />
-        </group>
-      ))}
-      {laundry.map((l, i) => (
-        <B key={i} p={l.p} s={[0.05, 0.75, 0.6]} c={l.c} cast={false} />
-      ))}
-      <B p={[-26, 10.55, 23]} s={[8.3, 0.3, 18.3]} c="#d8ccb2" />
-      <Cyl p={[-27.6, 11.6, 17]} r={0.8} h={1.8} c="#1c1c1c" rough={0.5} />
-      <Cyl p={[-27.6, 11.6, 19.2]} r={0.8} h={1.8} c="#1c1c1c" rough={0.5} />
-      <B p={[-26, 6.4, 15.1]} s={[3, 12.8, 2.2]} c={NAVY} r={0.7} />
-      <B p={[-21.97, 1.2, 22]} s={[0.06, 2.2, 1.6]} c="#3a2a1e" />
-      <B p={[-21.3, 2.45, 22]} s={[1.4, 0.2, 3]} c={NAVY} />
-      <Sign p={[-21.94, 9.6, 23.5]} w={7} h={0.8} text="HALL OF RESIDENCE" bg={NAVY} face="x" />
     </Pick>
   );
 }
@@ -346,7 +308,6 @@ export function Buildings() {
       <Library />
       <LectureTheatres />
       <Buka />
-      <Hall />
       <SportsCentre />
       <MainGate />
       <LagoonFront />

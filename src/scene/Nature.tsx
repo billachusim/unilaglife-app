@@ -4,7 +4,7 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ACTIONS } from "@/game/actions";
-import { PLACES, PROMENADE, ROADS, type Vec2 } from "@/game/data";
+import { BILLBOARDS, PLACES, PROMENADE, ROADS, type Vec2 } from "@/game/data";
 import { isBlocked } from "@/game/nav";
 import { mulberry } from "./textures";
 
@@ -16,7 +16,11 @@ interface TreeSpot {
   tilt: number;
 }
 
-const KEEP_CLEAR: Vec2[] = [...Object.values(PLACES).map((p) => p.door), ...ACTIONS.filter((a) => a.stage).map((a) => a.stage as Vec2)];
+const KEEP_CLEAR: Vec2[] = [
+  ...Object.values(PLACES).map((p) => p.door),
+  ...ACTIONS.filter((a) => a.stage).map((a) => a.stage as Vec2),
+  ...BILLBOARDS.map((b) => b.pos),
+];
 
 function onRoad(x: number, z: number, margin: number) {
   return ROADS.some((r) => {

@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect } from "react";
 import { initAuth, isVisitor, useAuth } from "@/game/auth";
 import { fetchCloudSave, pushCloudSave, startAutosave } from "@/game/cloud";
+import { startCampus } from "@/game/campus";
 import { connectCampus } from "@/game/online";
 import { beginWalk, skipIntro, toAdmission, toEnter, useIntro } from "@/game/intro";
 import { useGame } from "@/game/store";
@@ -87,6 +88,11 @@ function useStartAndSync() {
     if (!userId || !playing) return;
     return connectCampus(userId, isVisitor(useAuth.getState().user));
   }, [userId, playing, name]);
+
+  useEffect(() => {
+    if (!userId || !playing) return;
+    return startCampus(userId, isVisitor(useAuth.getState().user));
+  }, [userId, playing]);
 }
 
 export default function GameClient() {

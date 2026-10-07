@@ -19,7 +19,7 @@ The student email domain lives in `STUDENT_EMAIL_DOMAIN` (`src/game/auth.ts`) an
 
 1. Create a project at [supabase.com](https://supabase.com).
 2. **Project Settings → API**: copy the Project URL and the publishable key into `.env.local` (see `.env.local.example`), then restart `npm run dev`.
-3. **SQL Editor**: run `supabase/migrations/0001_saves.sql`, then `0002_unilag_students_only.sql`.
+3. **SQL Editor**: run `supabase/migrations/0001_saves.sql`, `0002_unilag_students_only.sql`, then `0003_campus.sql` (profiles, Hall Cup, SUG elections, sponsor slots).
 4. **Authentication → Emails → Templates**: in both **Magic Link** and **Confirm signup**, show the code — e.g. `<h2>Your UnilagLife gate code: {{ .Token }}</h2>` — so students receive a 6-digit code instead of only a link.
 5. **Custom SMTP (required for real students)**: Supabase's built-in mailer only delivers to your own team's addresses and is heavily rate-limited. Under **Authentication → Emails → SMTP Settings**, connect a provider such as Resend or Brevo sending from your own domain (e.g. `gate@unilaglife.app`), with SPF/DKIM set up so school Outlook inboxes don't junk it. Then raise the email rate limit under **Authentication → Rate Limits**.
 6. **Authentication → URL Configuration**: Site URL `http://localhost:3000` (later `https://unilaglife.app`).
@@ -33,12 +33,20 @@ The student email domain lives in `STUDENT_EMAIL_DOMAIN` (`src/game/auth.ts`) an
 
 Everyone on campus shares one Supabase Realtime channel: presence for who's online and where they're resting, broadcasts for walking paths, activities and chat. The top bar shows how many students are on campus; 💬 in the dock opens campus chat, and messages float over the sender's head.
 
-## Phase 1 (this build)
+## What's in the game
 
-- **World** — stylised isometric Akoka: Main Gate, Senate Building, Main Library, Lecture Theatres, Mama B's Buka, Hall of Residence, Lagoon Front (promenade + jetty), Sports Centre, the roundabout clock tower, Third Mainland Bridge and the mainland skyline across the lagoon, Akoka town outside the fence.
-- **Life sim** — five needs (energy, food, fun, social, hygiene), four skills, moodlets, a game clock with day/night lighting, weekly allowance from home, opening hours.
-- **Degree loop** — acceptance fee → matriculation → 3 classes per semester → exam (prep, attendance, skills and mood set the grade) → school fees each level → convocation with a real Nigerian degree class (First, 2:1, 2:2, Third, Pass).
-- **Campus life** — click-to-walk with A* pathfinding, NPC students who go home at night, the yellow campus shuttle, side hustles (typing assignments, washing plates).
+- **World** — stylised isometric Akoka: Main Gate, Senate Building, Main Library, Lecture Theatres (GST), Mama B's Buka, Lagoon Front with jetty, Sports Centre, Student Union Building, a **Halls quarter** (Jaja, Mariere, Eni Njoku, El-Kanemi, Moremi, Kofo Ademola, Madam Tinubu, Queen Amina) and a **Faculty Quad** with all 12 faculties; Third Mainland Bridge and the mainland skyline across the lagoon.
+- **Degree loop** — 23 real departments across 12 faculties (4–6 year degrees). Acceptance fee → matriculation → lectures at *your* faculty (GST counts too) → exams → school fees → convocation with a real degree class. ASUU strikes can suspend a semester.
+- **Halls** — allocated on the admission letter (male and female halls); sleep, bathe and gist at your own hall, visit friends at others (4 – 10 PM). Hall jerseys at the SUB.
+- **Hall Cup & Dean's List** — exams, football, Faculty Week, the Akoka Carnival and Sunday Inter-Hall Games earn points for your hall (server-side, rate-limited). Top CGPAs make the Dean's List.
+- **SUG elections** — a new term every real week: declare with a manifesto and a campus policy, vote once per term (changeable), see results by faculty. Last term's winner is President and their policy applies to everyone (steady light, cheaper buka, faster shuttles, reading rooms, Friday jams).
+- **Careers board** — SIWES and campus roles for students; 13 graduate roles gated by course and degree class, with a First earning 20% more per shift.
+- **Campus calendar** — Faculty Week, Akoka Carnival and Inter-Hall Games rotate by game week.
+- **Sponsors** — six billboards and a buka-menu slot. Empty slots invite brands to advertise.
+
+## Sponsors
+
+Add rows to `sponsor_slots` in the Supabase Table Editor. Use ids `billboard-1` … `billboard-6` (placement `billboard`) or any id with placement `buka`; `image_url` should be a public image (e.g. a public Supabase Storage bucket, 15:8); the slot shows between `starts_at` and `ends_at`. Advertising enquiries go to `ADVERTISE_CONTACT` in `src/ui/CampusPanels.tsx`.
 
 ## Layout
 
@@ -50,10 +58,14 @@ Everyone on campus shares one Supabase Realtime channel: presence for who's onli
 | `src/game/nav.ts` | Walkable grid + A* pathfinding |
 | `src/scene/` | React Three Fiber scene: terrain, buildings, avatars, lighting |
 | `src/game/intro.ts` | The gate intro: walk-up, check-in, admission letter, walk-in |
+| `src/game/campus.ts` | Shared campus state: profiles, Hall Cup, Dean's List, SUG elections, sponsors |
+| `src/game/jobs.ts`, `policy.ts`, `events.ts` | Careers board, SUG policies, campus calendar |
+| `src/game/online.ts` | Realtime presence, movement and chat |
 | `src/game/auth.ts`, `src/game/cloud.ts` | Supabase auth helpers and cloud save/autosave |
 | `src/ui/` | HUD, gate check-in register, admission letter, world labels |
 
-## Next phases
+## Next
 
-- **Phase 2** — all 12 faculties as separate buildings (~24 departments), the real halls (Jaja, Moremi, Kofo Ademola, Mariere, Eni Njoku, Biobaku, Fagunwa, Honours, El-Kanemi, Amina, New Hall) with hall rivalry, SUG elections with manifestos and posters, CGPA-driven jobs board, accounts + multiplayer presence.
-- **Phase 3** — sponsor noticeboards and buka menus, hall merch, seasonal events (Akoka Carnival, faculty week, ASUU-strike storylines).
+- Real-money payments for sponsor slots and merch (Paystack), an advertiser self-serve page.
+- Off-campus Yaba, and the College of Medicine at Idi-Araba as its own map.
+- Moderation for campus chat (reporting, filters) before a public launch.

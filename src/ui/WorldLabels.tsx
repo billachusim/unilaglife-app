@@ -35,7 +35,7 @@ function PlaceLabels() {
         const open = openMask[i] === "1";
         const isGoal = goal === id;
         return (
-          <div key={id} ref={refs[id]} style={anchorStyle}>
+          <div key={id} ref={refs[id]} style={anchorStyle} data-minzoom={isGoal || here === id ? 0 : (p.minZoom ?? 0)}>
             <button
               type="button"
               onClick={() => goToPlace(id)}

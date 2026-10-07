@@ -7,6 +7,12 @@ import {
   DEPTS,
   type DeptId,
   ECONOMY,
+  FACULTIES,
+  FACULTY_IDS,
+  type FacultyId,
+  HALL_IDS,
+  type HallId,
+  HALLS,
   HAIR_COLORS,
   HAIR_STYLES,
   type Look,
@@ -69,7 +75,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export function Onboarding({ defaultName = "", onAccept }: { defaultName?: string; onAccept?: () => void }) {
   const newGame = useGame((s) => s.newGame);
   const [name, setName] = useState(defaultName);
+  const [faculty, setFaculty] = useState<FacultyId>("science");
   const [dept, setDept] = useState<DeptId>("compsci");
+  const [hall, setHall] = useState<HallId>("moremi");
   const [look, setLook] = useState<Look>({
     body: "f",
     skin: SKIN_TONES[2],
@@ -90,7 +98,7 @@ export function Onboarding({ defaultName = "", onAccept }: { defaultName?: strin
           onSubmit={(e) => {
             e.preventDefault();
             if (!valid) return;
-            newGame(trimmed, look, dept);
+            newGame(trimmed, look, dept, hall);
             onAccept?.();
           }}
           className="w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl"
@@ -137,7 +145,10 @@ export function Onboarding({ defaultName = "", onAccept }: { defaultName?: strin
                       <button
                         key={id}
                         type="button"
-                        onClick={() => set({ body: id, hair: id === "m" ? "lowcut" : "braids" })}
+                        onClick={() => {
+                          set({ body: id, hair: id === "m" ? "lowcut" : "braids" });
+                          if (HALLS[hall].gender !== id) setHall(HALL_IDS.find((h) => HALLS[h].gender === id)!);
+                        }}
                         className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${look.body === id ? "bg-navy text-white" : "bg-paper text-ink hover:bg-line"}`}
                       >
                         {l}
@@ -178,9 +189,32 @@ export function Onboarding({ defaultName = "", onAccept }: { defaultName?: strin
                 </Field>
               </div>
 
-              <Field label="Course of study">
+              <Field label="Faculty">
+                <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
+                  {FACULTY_IDS.map((id) => {
+                    const f = FACULTIES[id];
+                    const on = faculty === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => {
+                          setFaculty(id);
+                          setDept(DEPT_IDS.find((d) => DEPTS[d].faculty === id)!);
+                        }}
+                        className={`flex flex-col items-center gap-0.5 rounded-lg px-1.5 py-2 text-center ring-1 transition ${on ? "bg-navy/5 ring-2 ring-navy" : "ring-line hover:ring-navy/40"}`}
+                      >
+                        <span className="text-lg leading-none">{f.emoji}</span>
+                        <span className="text-[11px] font-semibold leading-tight text-ink">{f.short}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              <Field label={`Course · ${FACULTIES[faculty].name}`}>
                 <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                  {DEPT_IDS.map((id) => {
+                  {DEPT_IDS.filter((id) => DEPTS[id].faculty === faculty).map((id) => {
                     const d = DEPTS[id];
                     const on = dept === id;
                     return (
@@ -193,10 +227,27 @@ export function Onboarding({ defaultName = "", onAccept }: { defaultName?: strin
                         <span className="text-lg">{d.emoji}</span>
                         <span className="min-w-0 flex-1">
                           <span className="block text-[13px] font-semibold leading-tight text-ink">{d.name}</span>
-                          <span className="block text-[11px] text-ink-soft">
-                            {d.faculty} · {d.years} yrs
-                          </span>
+                          <span className="block text-[11px] text-ink-soft">{d.years}-year degree</span>
                         </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              <Field label="Hall allocation">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {HALL_IDS.filter((h) => HALLS[h].gender === look.body).map((h) => {
+                    const on = hall === h;
+                    return (
+                      <button
+                        key={h}
+                        type="button"
+                        onClick={() => setHall(h)}
+                        className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left ring-1 transition ${on ? "bg-navy/5 ring-2 ring-navy" : "ring-line hover:ring-navy/40"}`}
+                      >
+                        <span className="h-4 w-4 shrink-0 rounded-full ring-1 ring-black/10" style={{ background: HALLS[h].color }} aria-hidden />
+                        <span className="text-[13px] font-semibold text-ink">{HALLS[h].name}</span>
                       </button>
                     );
                   })}

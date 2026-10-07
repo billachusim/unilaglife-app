@@ -3,6 +3,8 @@ import {
   DAY,
   DEPTS,
   type DeptId,
+  type HallId,
+  HALLS,
   type Look,
   type NeedKey,
   type PlaceId,
@@ -45,12 +47,17 @@ export interface UniState {
   history: ExamRecord[];
   readyToGraduate: boolean;
   grad: { cls: DegreeClass; cgpa: number; at: number } | null;
+  /** ASUU strike: no lectures or exams until this game time. */
+  strikeUntil?: number;
 }
 
 export interface SaveState {
-  version: 1;
+  version: 2;
   name: string;
   look: Look;
+  hall: HallId;
+  job: { id: string; since: number } | null;
+  owned: string[];
   money: number;
   time: number;
   needs: Record<NeedKey, number>;
@@ -161,4 +168,15 @@ export function durationLabel(minutes: number) {
     return `${h}h`;
   }
   return `${Math.max(1, Math.ceil(minutes))} min`;
+}
+
+/** Upgrades saves from older versions (local or cloud) to the current shape. */
+export function normalizeSave(raw: SaveState | (Omit<SaveState, "version" | "hall" | "job" | "owned"> & { version: number })): SaveState {
+  const s = { ...raw } as SaveState;
+  if (!s.hall || !HALLS[s.hall]) s.hall = s.look.body === "f" ? "moremi" : "jaja";
+  if (s.job === undefined) s.job = null;
+  if (!s.owned) s.owned = [];
+  if (!DEPTS[s.uni.dept]) s.uni = { ...s.uni, dept: "compsci" };
+  s.version = 2;
+  return s;
 }

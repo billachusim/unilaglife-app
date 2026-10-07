@@ -18,6 +18,7 @@ import { anchors } from "./anchors";
 import { gameCamera, introCamera } from "./cameras";
 import { Nature } from "./Nature";
 import { Peers } from "./Peers";
+import { Quarters } from "./Quarters";
 import { Shuttles } from "./Shuttle";
 import { Terrain } from "./Terrain";
 
@@ -118,7 +119,9 @@ function AnchorProjector() {
       v.current.project(camera);
       const x = (v.current.x * 0.5 + 0.5) * size.width;
       const y = (-v.current.y * 0.5 + 0.5) * size.height;
-      const off = x < -200 || y < -100 || x > size.width + 200 || y > size.height + 100;
+      const minZoom = Number(a.el.dataset.minzoom ?? 0);
+      const tooFar = minZoom > 0 && (camera as THREE.OrthographicCamera).isOrthographicCamera && camera.zoom < minZoom;
+      const off = tooFar || x < -200 || y < -100 || x > size.width + 200 || y > size.height + 100;
       a.el.style.visibility = off ? "hidden" : "visible";
       a.el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translate(-50%, -50%)`;
     }
@@ -164,6 +167,7 @@ export default function Scene() {
       <GameTicker />
       <Terrain />
       <Buildings />
+      <Quarters />
       <Nature />
       <Distant />
       <Shuttles />

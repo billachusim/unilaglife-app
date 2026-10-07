@@ -1,8 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ACTIONS, actionBlocker, actionLabel } from "@/game/actions";
-import { ACADEMICS, DEPTS, NEED_LABELS, type NeedKey, PLACE_IDS, PLACES, SKILL_LABELS, type SkillKey } from "@/game/data";
+import { ACTIONS, actionAppliesTo, actionBlocker, actionLabel, costOf, myFacultyPlace, myHallPlace } from "@/game/actions";
+import { type CampusPanel, openPanel, useCampus } from "@/game/campus";
+import { campusEventAt } from "@/game/events";
+import { POLICIES } from "@/game/policy";
+import { CampusPanels } from "./CampusPanels";
+import { ACADEMICS, DEPTS, FACULTIES, HALLS, NEED_LABELS, type NeedKey, type PlaceId, PLACES, SKILL_LABELS, type SkillKey } from "@/game/data";
 import { goToPlace } from "@/game/interaction";
 import { objectiveFor } from "@/game/objective";
 import {
@@ -136,6 +140,30 @@ function ObjectiveCard() {
   );
 }
 
+function CampusStatus() {
+  const time = useGame((s) => s.save!.time);
+  const strikeUntil = useGame((s) => s.save!.uni.strikeUntil);
+  const president = useCampus((s) => s.president);
+  const event = campusEventAt(time);
+  const chips: { key: string; text: string; tone: string }[] = [];
+  if (strikeUntil && time < strikeUntil) chips.push({ key: "strike", text: "🪧 ASUU strike — lectures suspended", tone: "bg-alert/15 text-alert" });
+  if (event) chips.push({ key: "event", text: `${event.emoji} ${event.label} · ${event.blurb}`, tone: "bg-amber/20 text-[#7a4f12]" });
+  if (president) {
+    const p = POLICIES[president.policy];
+    chips.push({ key: "policy", text: `${p.emoji} SUG: ${p.label}`, tone: "bg-lagoon/15 text-[#1f6b67]" });
+  }
+  if (!chips.length) return null;
+  return (
+    <div className="pointer-events-auto flex max-w-md flex-wrap gap-1.5 self-start">
+      {chips.map((c) => (
+        <span key={c.key} className={`glass rounded-full px-3 py-1 text-[11px] font-semibold ${c.tone}`}>
+          {c.text}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function barColor(v: number) {
   if (v >= 50) return "bg-lagoon";
   if (v >= 25) return "bg-amber";
@@ -168,6 +196,8 @@ function NeedsCard() {
 }
 
 function Dock() {
+  const save = useGame((s) => s.save)!;
+  const dockPlaces: PlaceId[] = ["mainGate", "senate", myFacultyPlace(save), "library", "buka", myHallPlace(save), "sub", "lagoon", "sports"];
   const connected = useOnline((s) => s.connected);
   const chatOpen = useOnline((s) => s.chatOpen);
   const unread = useOnline((s) => s.unread);
@@ -176,7 +206,7 @@ function Dock() {
   const here = useGame((s) => s.here);
   return (
     <nav className="glass pointer-events-auto flex items-center gap-0.5 overflow-x-auto rounded-2xl p-1 [scrollbar-width:none]" aria-label="Campus places">
-      {PLACE_IDS.map((id) => (
+      {dockPlaces.map((id) => (
         <button
           key={id}
           type="button"
@@ -189,6 +219,24 @@ function Dock() {
         </button>
       ))}
       <div className="mx-1 h-6 w-px shrink-0 bg-line" />
+      {(
+        [
+          ["sug", "🗳️", "SUG elections"],
+          ["hallCup", "🏆", "Hall Cup & Dean's List"],
+          ["jobs", "💼", "Careers board"],
+        ] as [CampusPanel, string, string][]
+      ).map(([id, emoji, label]) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => openPanel(id)}
+          aria-label={label}
+          title={label}
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-lg transition hover:bg-paper"
+        >
+          {emoji}
+        </button>
+      ))}
       {connected && (
         <button
           type="button"
@@ -306,7 +354,15 @@ function Toasts() {
   );
 }
 
+const PLACE_LINKS: Partial<Record<PlaceId | "hallCup", { panel: CampusPanel; emoji: string; label: string }[]>> = {
+  sub: [{ panel: "sug", emoji: "🗳️", label: "Election board" }],
+  senate: [{ panel: "jobs", emoji: "💼", label: "Careers board" }],
+  sports: [{ panel: "hallCup", emoji: "🏆", label: "Hall Cup" }],
+  hallCup: [{ panel: "hallCup", emoji: "🏆", label: "Hall Cup standings" }],
+};
+
 function PlacePanel() {
+  const sponsors = useCampus((s) => s.sponsors);
   const panel = useGame((s) => s.panel);
   const save = useGame((s) => s.save)!;
   const activity = useGame((s) => s.activity);
@@ -315,7 +371,10 @@ function PlacePanel() {
   if (!panel) return null;
   const place = PLACES[panel];
   const closed = closedReason(panel, save.time);
-  const actions = ACTIONS.filter((a) => a.place === panel && (!a.visible || a.visible(save)));
+  const actions = ACTIONS.filter((a) => actionAppliesTo(a, panel, save) && (!a.visible || a.visible(save)));
+  const links = PLACE_LINKS[panel] ?? (place.kind === "hall" ? PLACE_LINKS.hallCup : undefined);
+  const bukaSponsor = Object.values(sponsors).find((x) => x.placement === "buka");
+  const mine = panel === myHallPlace(save) ? "Your hall" : panel === myFacultyPlace(save) ? "Your faculty" : null;
   const allDay = place.open[0] === 0 && place.open[1] === 24;
 
   return (
@@ -335,7 +394,29 @@ function PlacePanel() {
           ✕
         </button>
       </div>
-      <p className="px-4 pt-3 text-[13px] leading-relaxed text-ink-soft">{place.blurb}</p>
+      <p className="px-4 pt-3 text-[13px] leading-relaxed text-ink-soft">
+        {mine && <span className="mr-1.5 rounded bg-lagoon/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-lagoon">{mine}</span>}
+        {place.blurb}
+      </p>
+      {panel === "buka" && bukaSponsor && (
+        <p className="mx-4 mt-2 rounded-lg bg-amber/15 px-3 py-1.5 text-[12px] text-[#7a4f12]">
+          Today&apos;s menu is sponsored by <strong>{bukaSponsor.title}</strong>
+        </p>
+      )}
+      {links && (
+        <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
+          {links.map((l) => (
+            <button
+              key={l.panel}
+              type="button"
+              onClick={() => openPanel(l.panel)}
+              className="rounded-lg bg-navy px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-navy-deep"
+            >
+              {l.emoji} {l.label}
+            </button>
+          ))}
+        </div>
+      )}
       {actions.length === 0 && <p className="px-4 pb-4 pt-2 text-[13px] text-ink-soft">Nothing to do here right now — check your next step.</p>}
       <ul className="flex flex-col gap-1.5 overflow-y-auto p-3">
         {actions.map((a) => {
@@ -360,7 +441,7 @@ function PlacePanel() {
                 </span>
                 <span className="flex shrink-0 flex-col items-end gap-0.5">
                   {a.minutes > 0 && <span className="num text-[11px] text-ink-soft">{a.minutes >= 60 ? `${+(a.minutes / 60).toFixed(1)}h` : `${a.minutes}m`}</span>}
-                  {a.cost ? <span className="num text-[11px] font-medium text-alert">−{naira(a.cost)}</span> : null}
+                  {costOf(a) ? <span className="num text-[11px] font-medium text-alert">−{naira(costOf(a))}</span> : null}
                   {earn ? <span className="num text-[11px] font-medium text-lagoon">+{naira(earn)}</span> : null}
                   {running && <span className="text-[10px] font-semibold uppercase tracking-wide text-lagoon">Now</span>}
                 </span>
@@ -420,7 +501,12 @@ function ProfilePanel() {
           </div>
           <h2 className="mt-2 font-display text-2xl font-semibold">{save.name}</h2>
           <p className="text-sm text-white/80">
-            {dept.emoji} {dept.name} · {dept.faculty}
+            {dept.emoji} {dept.name} · {FACULTIES[dept.faculty].name}
+            <br />
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full ring-1 ring-white/40" style={{ background: HALLS[save.hall].color }} aria-hidden />
+              {HALLS[save.hall].name}
+            </span>
           </p>
           <div className="mt-4 grid grid-cols-3 gap-2">
             {[
@@ -576,6 +662,7 @@ export function Hud() {
       <div className="flex flex-col gap-2 p-2 sm:p-3">
         <TopBar />
         <ObjectiveCard />
+        <CampusStatus />
       </div>
       <div className="flex-1" />
       <div className="flex items-end justify-between gap-2 p-2 sm:p-3">
@@ -597,6 +684,7 @@ export function Hud() {
       </div>
       <MobileNeeds />
       <ProfilePanel />
+      <CampusPanels />
     </div>
   );
 }

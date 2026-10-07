@@ -1,12 +1,20 @@
 import {
   ACADEMICS,
+  DAY,
   DEPTS,
   ECONOMY,
+  facultyPlaceId,
+  HALLS,
+  hallPlaceId,
   type NeedKey,
   type PlaceId,
+  PLACES,
   type SkillKey,
   type Vec2,
 } from "./data";
+import { campusEventAt } from "./events";
+import { JOB_BY_ID, jobBlocker, shiftPay } from "./jobs";
+import { policyIs } from "./policy";
 import {
   classOf,
   cgpaOf,
@@ -24,9 +32,14 @@ import {
 
 export type Pose = "stand" | "sit" | "sleep" | "run" | "work" | "wave" | "halt";
 
+/** Where an action happens: a fixed place, or relative to the student (their own hall/faculty, or someone else's). */
+export type ActionPlace = PlaceId | "myHall" | "otherHall" | "myFaculty" | "otherFaculty";
+
 export interface ActionDef {
   id: string;
-  place: PlaceId;
+  place: ActionPlace;
+  /** Points this earns the student's hall in the Hall Cup. */
+  hallPoints?: number;
   label: string | ((s: SaveState) => string);
   emoji: string;
   minutes: number;
@@ -53,6 +66,12 @@ const MOODLETS = {
   graduated: { label: "Graduated!", emoji: "👨🏾‍🎓", value: 40, hours: 72, desc: "Cap, gown, and Mummy crying with joy." },
   lagoonBreeze: { label: "Lagoon Breeze", emoji: "🌅", value: 12, hours: 4, desc: "Sunset over the lagoon, Third Mainland Bridge glowing." },
   mummyAlert: { label: "Mummy's Alert", emoji: "📲", value: 10, hours: 6, desc: "\"Your allowance has been sent. Read your books o!\"" },
+  aluta: { label: "Aluta Continua", emoji: "✊🏾", value: 10, hours: 8, desc: "You voted in the SUG election. A luta continua, victoria ascerta!" },
+  hallPride: { label: "Hall Pride", emoji: "🏆", value: 14, hours: 6, desc: "Your hall showed up at the inter-hall games. The chants are still going." },
+  carnival: { label: "Carnival Spirit", emoji: "🎭", value: 18, hours: 8, desc: "Costumes, drums and the whole of Akoka dancing on the road." },
+  deptWeek: { label: "Faculty Week", emoji: "🎉", value: 14, hours: 8, desc: "Dinner night, awards and photos with the whole faculty." },
+  strikeBlues: { label: "ASUU Strike", emoji: "🪧", value: -8, hours: 12, desc: "Lectures on hold again. When will this strike end?" },
+  freshFit: { label: "Fresh Fit", emoji: "👕", value: 8, hours: 12, desc: "New campus merch. You're looking like a proper Akokite." },
 } as const;
 
 export type MoodletId = keyof typeof MOODLETS;
@@ -71,6 +90,7 @@ function studentGate(s: SaveState): string | null {
   if (u.status === "graduate") return "You've graduated 🎓";
   if (u.paidLevel < u.level) return `Pay your ${levelLabel(u.level)} school fees at the Senate first`;
   if (u.readyToGraduate) return "All exams done — convocation awaits at the Senate";
+  if (u.strikeUntil && s.time < u.strikeUntil) return `ASUU is on strike — no lectures or exams for ${durationLabel(u.strikeUntil - s.time)}`;
   return null;
 }
 
@@ -116,6 +136,7 @@ function runExam(s: SaveState): string {
     s.skills.academics * 2 +
     s.skills[dept.skill] * 0.8 +
     (mood - 50) * 0.12 +
+    (policyIs("readingRooms") ? 4 : 0) +
     (Math.random() * 12 - 6);
   const score = Math.max(0, Math.min(100, Math.round(raw)));
   const { grade, gp } = gradeOf(score);
@@ -135,9 +156,16 @@ function runExam(s: SaveState): string {
   u.classes = 0;
   u.prep = 0;
   u.semStart = s.time;
+  let strike = "";
+  if (!u.readyToGraduate && Math.random() < 0.12) {
+    u.strikeUntil = s.time + 2 * DAY;
+    u.semStart = u.strikeUntil;
+    addMoodlet(s, "strikeBlues");
+    strike = " 🪧 ASUU has declared a 2-day strike.";
+  }
 
   const verdict = grade === "A" ? "🌟" : grade === "F" ? "😩 Carry-over." : "✅";
-  return `${code}: you scored ${score} — ${grade} ${verdict} CGPA now ${cgpaOf(u).toFixed(2)}`;
+  return `${code}: you scored ${score} — ${grade} ${verdict} CGPA now ${cgpaOf(u).toFixed(2)}${strike}`;
 }
 
 function graduate(s: SaveState): string {
@@ -233,10 +261,10 @@ export const ACTIONS: ActionDef[] = [
     apply: graduate,
   },
 
-  // ---------- Lecture theatres ----------
+  // ---------- Your faculty ----------
   {
     id: "lecture",
-    place: "lectures",
+    place: "myFaculty",
     label: "Attend a Lecture",
     emoji: "📝",
     minutes: 60,
@@ -257,7 +285,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: "tutorial",
-    place: "lectures",
+    place: "myFaculty",
     label: "Attend a Tutorial",
     emoji: "👥",
     minutes: 90,
@@ -277,7 +305,8 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: "exam",
-    place: "lectures",
+    place: "myFaculty",
+    hallPoints: 2,
     label: (s) => `Write ${courseCode(s)} Exam`,
     emoji: "✍🏾",
     minutes: 180,
@@ -419,7 +448,7 @@ export const ACTIONS: ActionDef[] = [
   // ---------- Hall ----------
   {
     id: "sleep",
-    place: "hall",
+    place: "myHall",
     label: "Sleep (8 hours)",
     emoji: "😴",
     minutes: 480,
@@ -428,10 +457,16 @@ export const ACTIONS: ActionDef[] = [
     hint: "Restores energy",
     needs: { energy: 85 },
     lines: ["You slept like light was steady all night 😴", "Eight solid hours. Your roommate's snoring didn't win this time."],
+    apply: (s) => {
+      if (policyIs("steadyLight")) {
+        s.needs.energy = Math.min(100, s.needs.energy + 17);
+        return "💡 Steady light all night — the fan never stopped. Best sleep this session 😴";
+      }
+    },
   },
   {
     id: "nap",
-    place: "hall",
+    place: "myHall",
     label: "Take a Nap",
     emoji: "💤",
     minutes: 60,
@@ -443,7 +478,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: "bath",
-    place: "hall",
+    place: "myHall",
     label: "Bucket Bath",
     emoji: "🚿",
     minutes: 20,
@@ -454,7 +489,7 @@ export const ACTIONS: ActionDef[] = [
   },
   {
     id: "hallGist",
-    place: "hall",
+    place: "myHall",
     label: "Gist with Roommates",
     emoji: "🗣️",
     minutes: 60,
@@ -527,6 +562,7 @@ export const ACTIONS: ActionDef[] = [
     hint: "Fun, social, fitness — and sweat",
     needs: { fun: 28, social: 14, energy: -22, hygiene: -25, hunger: -8 },
     skills: { fitness: 0.45, charisma: 0.1 },
+    hallPoints: 1,
     lines: ["You scored and the whole hall will hear about it ⚽", "The match ended 3–3. Everyone is claiming victory."],
   },
   {
@@ -564,13 +600,227 @@ export const ACTIONS: ActionDef[] = [
     hint: "Leave campus",
     check: () => "Yaba and the rest of Lagos open in a later update 🚧",
   },
+  {
+    id: "work",
+    place: "mainGate",
+    label: (s) => `Work a Shift — ${s.job ? JOB_BY_ID[s.job.id]?.title : "Job"}`,
+    emoji: "💼",
+    minutes: 480,
+    indoor: true,
+    hint: "8 hours off campus · pay rises with your degree class",
+    earn: (s) => (s.job ? shiftPay(JOB_BY_ID[s.job.id], s) : 0),
+    needs: { energy: -30, fun: -12, hunger: -10, social: 6 },
+    skills: { hustle: 0.4 },
+    visible: (s) => !!s.job,
+    check: (s) => {
+      const job = s.job && JOB_BY_ID[s.job.id];
+      if (!job) return "Get a job from the Careers board first";
+      const blocked = jobBlocker(job, s);
+      if (blocked) return blocked;
+      const h = hourOf(s.time);
+      if (weekdayOf(s.time) >= 5 || h < 7 || h >= 10) return "Shifts start Mon – Fri, 7 – 10 AM";
+      return null;
+    },
+    lines: ["Long day, but the alert is sweet 💸", "Your manager said \"good job\". You'll take it."],
+  },
+  {
+    id: "carnivalFloat",
+    place: "mainGate",
+    label: "Join a Carnival Float",
+    emoji: "🎭",
+    minutes: 180,
+    cost: 1500,
+    hint: "Akoka Carnival · costume and all",
+    needs: { fun: 35, social: 20, energy: -12 },
+    skills: { charisma: 0.3 },
+    hallPoints: 2,
+    visible: (s) => campusEventAt(s.time)?.id === "carnival",
+    lines: ["Drums, costumes and the whole of Akoka on the road 🥁"],
+    apply: (s) => addMoodlet(s, "carnival"),
+  },
+
+  // ---------- GST at the Lecture Theatres ----------
+  {
+    id: "gst",
+    place: "lectures",
+    label: "Attend a GST Lecture",
+    emoji: "📝",
+    minutes: 60,
+    indoor: true,
+    hint: "General Studies — counts as a class for every faculty",
+    needs: { energy: -5, fun: -6, social: 8 },
+    skills: { academics: 0.15, charisma: 0.1 },
+    check: classGate,
+    lines: ["GST 101: 1,200 students, one microphone. You heard about half of it 🎤", "You sat with students from every faculty. New friends unlocked."],
+    apply: (s) => {
+      s.uni.classes += 1;
+      bumpPrep(s, 1);
+    },
+  },
+
+  // ---------- Other faculties ----------
+  {
+    id: "facultyHangout",
+    place: "otherFaculty",
+    label: "Hang Out with Students Here",
+    emoji: "🤝",
+    minutes: 45,
+    hint: "Make friends across campus",
+    needs: { social: 16, fun: 6 },
+    skills: { charisma: 0.15 },
+    lines: ["You now have a friend in every faculty. Networking 😎"],
+  },
+  {
+    id: "facultyDinner",
+    place: "myFaculty",
+    label: "Faculty Week Dinner Night",
+    emoji: "🎉",
+    minutes: 150,
+    cost: 1000,
+    hint: "Faculty Week · 6 – 10 PM",
+    needs: { social: 30, fun: 22, hunger: 30 },
+    skills: { charisma: 0.25 },
+    hallPoints: 1,
+    visible: (s) => campusEventAt(s.time)?.id === "facultyWeek",
+    check: (s) => {
+      const h = hourOf(s.time);
+      return h < 18 || h >= 22 ? "Dinner runs 6 – 10 PM" : null;
+    },
+    lines: ["Awards, jollof and photos with the whole faculty 📸"],
+    apply: (s) => addMoodlet(s, "deptWeek"),
+  },
+
+  // ---------- Other halls ----------
+  {
+    id: "visitHall",
+    place: "otherHall",
+    label: "Visit Friends Here",
+    emoji: "🚪",
+    minutes: 60,
+    hint: "Visiting hours 4 – 10 PM",
+    needs: { social: 22, fun: 10 },
+    skills: { charisma: 0.15 },
+    check: (s) => {
+      const h = hourOf(s.time);
+      return h < 16 || h >= 22 ? "Visiting hours are 4 – 10 PM" : null;
+    },
+    lines: ["The porter signed you in. Gist, snacks and one borrowed charger later… 🔌"],
+  },
+
+  // ---------- Sports: inter-hall games ----------
+  {
+    id: "interHall",
+    place: "sports",
+    label: (s) => `Represent ${HALLS[s.hall].name} at Inter-Hall`,
+    emoji: "🏆",
+    minutes: 120,
+    pose: "run",
+    stage: [26, 28],
+    hint: "Inter-Hall Games · big Hall Cup points",
+    needs: { fun: 30, social: 24, energy: -24, hygiene: -25 },
+    skills: { fitness: 0.5 },
+    hallPoints: 5,
+    visible: (s) => campusEventAt(s.time)?.id === "interHall",
+    lines: ["Tug of war, relay, football — your hall showed up! 🏆"],
+    apply: (s) => addMoodlet(s, "hallPride"),
+  },
+
+  // ---------- Student Union Building ----------
+  {
+    id: "rally",
+    place: "sub",
+    label: "Attend a Campaign Rally",
+    emoji: "📢",
+    minutes: 60,
+    hint: "Hear the SUG aspirants out",
+    needs: { social: 20, fun: 12 },
+    skills: { charisma: 0.25 },
+    lines: ['"Aluta!" "Continua!" The aspirants promised steady light and cheaper jollof ✊🏾'],
+  },
+  {
+    id: "hallJersey",
+    place: "sub",
+    label: (s) => `Buy a ${HALLS[s.hall].name} Jersey`,
+    emoji: "👕",
+    minutes: 10,
+    cost: 3000,
+    hint: "Wear your hall's colours",
+    visible: (s) => !s.owned.includes("hallJersey"),
+    apply: (s) => {
+      s.owned = [...s.owned, "hallJersey"];
+      s.look = { ...s.look, top: HALLS[s.hall].color };
+      addMoodlet(s, "freshFit");
+      return `👕 Your ${HALLS[s.hall].name} jersey fits perfectly. Hall pride!`;
+    },
+  },
+  {
+    id: "hoodie",
+    place: "sub",
+    label: "Buy a UNILAG Hoodie",
+    emoji: "🧥",
+    minutes: 10,
+    cost: 4500,
+    hint: "Navy, with the crest on the chest",
+    visible: (s) => !s.owned.includes("hoodie"),
+    apply: (s) => {
+      s.owned = [...s.owned, "hoodie"];
+      s.look = { ...s.look, top: "#1d3a6e" };
+      addMoodlet(s, "freshFit");
+      return "🧥 UNILAG hoodie on. In Deed and In Truth 💙";
+    },
+  },
+  {
+    id: "senateSteps",
+    place: "senate",
+    label: "Watch the Carnival from the Senate Steps",
+    emoji: "🥁",
+    minutes: 90,
+    hint: "Free · Akoka Carnival",
+    needs: { fun: 18, social: 10 },
+    visible: (s) => campusEventAt(s.time)?.id === "carnival",
+    lines: ["Best view on campus. The faculty floats went all out 🎊"],
+  },
 ];
+
+/** Cost after the SUG President's policy (subsidised buka). */
+export function costOf(a: ActionDef): number {
+  if (!a.cost) return 0;
+  return a.place === "buka" && policyIs("cheapBuka") ? Math.round(a.cost * 0.8) : a.cost;
+}
+
+export const myHallPlace = (s: SaveState) => hallPlaceId(s.hall);
+export const myFacultyPlace = (s: SaveState) => facultyPlaceId(DEPTS[s.uni.dept].faculty);
+
+/** Does action `a` show at `place` for this student? */
+export function actionAppliesTo(a: ActionDef, place: PlaceId, s: SaveState): boolean {
+  switch (a.place) {
+    case "myHall":
+      return place === myHallPlace(s);
+    case "otherHall":
+      return PLACES[place].kind === "hall" && place !== myHallPlace(s);
+    case "myFaculty":
+      return place === myFacultyPlace(s);
+    case "otherFaculty":
+      return PLACES[place].kind === "faculty" && place !== myFacultyPlace(s);
+    default:
+      return a.place === place;
+  }
+}
+
+/** The concrete place an action runs at, given where the student is standing. */
+export function placeFor(a: ActionDef, s: SaveState, here: PlaceId | null): PlaceId {
+  if (a.place === "myHall") return myHallPlace(s);
+  if (a.place === "myFaculty") return myFacultyPlace(s);
+  if ((a.place === "otherHall" || a.place === "otherFaculty") && here) return here;
+  return a.place as PlaceId;
+}
 
 export const ACTION_BY_ID = Object.fromEntries(ACTIONS.map((a) => [a.id, a])) as Record<string, ActionDef>;
 
 export const actionLabel = (a: ActionDef, s: SaveState) => (typeof a.label === "function" ? a.label(s) : a.label);
 
 export function actionBlocker(a: ActionDef, s: SaveState): string | null {
-  if (a.cost && s.money < a.cost) return `You need ${naira(a.cost)} — you have ${naira(s.money)}`;
+  const cost = costOf(a);
+  if (cost && s.money < cost) return `You need ${naira(cost)} — you have ${naira(s.money)}`;
   return a.check ? a.check(s) : null;
 }

@@ -3,7 +3,7 @@
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
-import { DAY, HAIR_COLORS, HAIR_STYLES, type Look, OUTFIT_COLORS, PLACE_IDS, PLACES, SKIN_TONES } from "@/game/data";
+import { DAY, HAIR_COLORS, HAIR_STYLES, HALL_IDS, type HallId, hallPlaceId, type Look, OUTFIT_COLORS, PLACE_IDS, PLACES, SKIN_TONES } from "@/game/data";
 import { randomOpenPoint } from "@/game/nav";
 import { type Agent, makeAgent, player, setAgentPath, stepAgent } from "@/game/runtime";
 import { useIntro } from "@/game/intro";
@@ -38,6 +38,7 @@ export function Player() {
 interface Npc {
   agent: Agent;
   look: Look;
+  hall: HallId;
   wait: number;
   home: boolean;
 }
@@ -64,6 +65,7 @@ export function Npcs() {
     return Array.from({ length: NPC_COUNT }, () => ({
       agent: makeAgent(randomOpenPoint(rand), 2.4 + rand() * 1.1),
       look: randomLook(rand),
+      hall: HALL_IDS[Math.floor(rand() * HALL_IDS.length)],
       wait: rand() * 4,
       home: false,
     }));
@@ -90,7 +92,7 @@ export function Npcs() {
       n.wait -= dt;
       if (n.wait > 0) continue;
       if (night) {
-        setAgentPath(a, PLACES.hall.door, () => {
+        setAgentPath(a, PLACES[hallPlaceId(n.hall)].door, () => {
           a.hidden = true;
           n.home = true;
         });

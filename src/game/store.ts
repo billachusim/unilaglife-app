@@ -4,6 +4,7 @@ import {
   DEPTS,
   type DeptId,
   ECONOMY,
+  type HallId,
   type Look,
   NEED_DECAY,
   type NeedKey,
@@ -15,8 +16,10 @@ import {
   type Vec2,
   WEEK,
 } from "./data";
-import { ACTION_BY_ID, actionBlocker, actionLabel, addMoodlet } from "./actions";
-import { closedReason, hourOf, naira, type SaveState, weekdayOf } from "./state";
+import { ACTION_BY_ID, type ActionDef, actionBlocker, actionLabel, addMoodlet, costOf, placeFor } from "./actions";
+import { JOB_BY_ID, jobBlocker } from "./jobs";
+import { policyIs } from "./policy";
+import { closedReason, hourOf, naira, normalizeSave, type SaveState, weekdayOf } from "./state";
 import { player, walkTo } from "./runtime";
 
 export interface Activity {
@@ -43,7 +46,7 @@ interface GameStore {
   profileOpen: boolean;
   speed: number;
   setSpeed: (n: number) => void;
-  newGame: (name: string, look: Look, dept: DeptId) => void;
+  newGame: (name: string, look: Look, dept: DeptId, hall: HallId) => void;
   loadSave: (save: SaveState) => void;
   resetGame: () => void;
   tick: (dt: number) => void;
@@ -58,7 +61,12 @@ interface GameStore {
   setFollow: (v: boolean) => void;
   setPos: (pos: Vec2) => void;
   setProfileOpen: (v: boolean) => void;
+  applyJob: (id: string) => void;
+  quitJob: () => void;
 }
+
+/** Notified after every completed action (e.g. to award Hall Cup points). */
+export const actionListeners = new Set<(def: ActionDef, save: SaveState) => void>();
 
 const clamp = (n: number) => Math.max(0, Math.min(100, n));
 const NEED_WARNINGS: Record<NeedKey, string> = {
@@ -88,14 +96,17 @@ export const useGame = create<GameStore>()(
       speed: 1,
       setSpeed: (n) => set({ speed: n }),
 
-      newGame: (name, look, dept) => {
+      newGame: (name, look, dept, hall) => {
         const skills: Record<SkillKey, number> = { academics: 0.5, fitness: 0.5, charisma: 0.5, hustle: 0.5 };
         skills[DEPTS[dept].skill] = 1.5;
         const start = PLACES.mainGate.door;
         const save: SaveState = {
-          version: 1,
+          version: 2,
           name,
           look,
+          hall,
+          job: null,
+          owned: [],
           money: ECONOMY.startMoney,
           time: START_TIME,
           needs: { energy: 85, hunger: 70, fun: 75, social: 70, hygiene: 80 },
@@ -128,7 +139,8 @@ export const useGame = create<GameStore>()(
         get().pushToast(`🎉 Welcome to UNILAG, ${name}! Head to the Senate Building to secure your admission.`, "good");
       },
 
-      loadSave: (save) => {
+      loadSave: (raw) => {
+        const save = normalizeSave(raw);
         player.x = save.pos[0];
         player.z = save.pos[1];
         player.path = [];
@@ -153,11 +165,13 @@ export const useGame = create<GameStore>()(
 
         const s: SaveState = { ...save, needs: { ...save.needs } };
         s.time += minutes;
+        player.speed = policyIs("moreShuttles") ? 5.3 : 4.6;
         const warnings: string[] = [];
         for (const k of Object.keys(s.needs) as NeedKey[]) {
           if (k === "energy" && running?.sleep) continue;
           const before = s.needs[k];
-          s.needs[k] = clamp(before - (NEED_DECAY[k] * minutes) / 60);
+          const rate = k === "fun" && policyIs("fridayJams") ? 0.75 : 1;
+          s.needs[k] = clamp(before - (NEED_DECAY[k] * rate * minutes) / 60);
           if (before >= 15 && s.needs[k] < 15) warnings.push(NEED_WARNINGS[k]);
         }
         if (s.moodlets.some((m) => m.until <= s.time)) s.moodlets = s.moodlets.filter((m) => m.until > s.time);
@@ -193,12 +207,12 @@ export const useGame = create<GameStore>()(
           return;
         }
         const def = ACTION_BY_ID[id];
-        const blocker = closedReason(def.place, save.time) ?? actionBlocker(def, save);
+        const blocker = closedReason(placeFor(def, save, get().here), save.time) ?? actionBlocker(def, save);
         if (blocker) {
           get().pushToast(blocker, "bad");
           return;
         }
-        const s = { ...save, money: save.money - (def.cost ?? 0) };
+        const s = { ...save, money: save.money - costOf(def) };
         const duration = realDuration(def.minutes);
         const next: Activity = {
           actionId: id,
@@ -230,7 +244,7 @@ export const useGame = create<GameStore>()(
         const { save, activity } = get();
         if (!save || !activity) return true;
         if (!activity.waiting) return false;
-        const refund = ACTION_BY_ID[activity.actionId].cost ?? 0;
+        const refund = costOf(ACTION_BY_ID[activity.actionId]);
         set({ save: { ...save, money: save.money + refund }, activity: null });
         return true;
       },
@@ -254,6 +268,7 @@ export const useGame = create<GameStore>()(
         player.pose = "stand";
         set({ save: s, activity: null });
         get().pushToast(earned ? `${line}  +${naira(earned)}` : line, "good");
+        for (const fn of actionListeners) fn(def, s);
       },
 
       pushToast: (text, tone = "info") => {
@@ -272,12 +287,36 @@ export const useGame = create<GameStore>()(
       },
 
       setProfileOpen: (v) => set({ profileOpen: v }),
+
+      applyJob: (id) => {
+        const save = get().save;
+        const job = JOB_BY_ID[id];
+        if (!save || !job) return;
+        const blocked = jobBlocker(job, save);
+        if (blocked) {
+          get().pushToast(blocked, "bad");
+          return;
+        }
+        set({ save: { ...save, job: { id, since: save.time } } });
+        get().pushToast(`${job.emoji} You're hired: ${job.title} at ${job.employer}! Shifts start from the Main Gate.`, "good");
+      },
+
+      quitJob: () => {
+        const save = get().save;
+        if (save?.job) set({ save: { ...save, job: null } });
+      },
     }),
     {
       name: "unilaglife-save-v1",
+      version: 2,
       partialize: (st) => ({ save: st.save }),
+      migrate: (persisted) => {
+        const p = persisted as { save: SaveState | null };
+        return { save: p.save ? normalizeSave(p.save) : null };
+      },
       onRehydrateStorage: () => (st) => {
         if (st?.save) {
+          st.save = normalizeSave(st.save);
           player.x = st.save.pos[0];
           player.z = st.save.pos[1];
         }

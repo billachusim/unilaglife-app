@@ -272,6 +272,8 @@ const LAMP_SPOTS: [number, number][] = (() => {
   for (let z = -26; z <= 40; z += 9) if (Math.abs(z - 8) > 5) spots.push([5.2, z]);
   for (let x = -26; x <= 28; x += 10) spots.push([x, -10.4]);
   spots.push([-27.5, -16.2], [-22, -21.6], [-18.4, -25.4]);
+  for (let x = -46; x <= 2; x += 11) spots.push([x + 5.5, 31.3], [x + 5.5, 46.8]);
+  for (let z = -42; z <= -12; z += 9) spots.push([38.8, z], [47.8, z]);
   return spots;
 })();
 

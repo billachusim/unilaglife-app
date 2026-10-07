@@ -1,4 +1,5 @@
-import { ACADEMICS, DEPTS, ECONOMY, type NeedKey, type PlaceId } from "./data";
+import { myFacultyPlace, myHallPlace } from "./actions";
+import { ACADEMICS, DEPTS, ECONOMY, FACULTIES, HALLS, type NeedKey, type PlaceId } from "./data";
 import { durationLabel, examOpensIn, levelLabel, naira, type SaveState } from "./state";
 
 export interface Objective {
@@ -7,17 +8,25 @@ export interface Objective {
   urgent?: boolean;
 }
 
-const NEED_FIX: Record<NeedKey, Objective> = {
-  hunger: { text: "You're starving — grab food at Mama B's Buka", place: "buka", urgent: true },
-  energy: { text: "You're exhausted — sleep at your hall", place: "hall", urgent: true },
-  hygiene: { text: "You need a bath — head to your hall", place: "hall", urgent: true },
-  fun: { text: "You need a break — unwind at the Lagoon Front", place: "lagoon", urgent: true },
-  social: { text: "You're lonely — gist with your roommates at the hall", place: "hall", urgent: true },
-};
+function needFix(k: NeedKey, s: SaveState): Objective {
+  const hall = HALLS[s.hall].name;
+  switch (k) {
+    case "hunger":
+      return { text: "You're starving — grab food at Mama B's Buka", place: "buka", urgent: true };
+    case "energy":
+      return { text: `You're exhausted — sleep at ${hall}`, place: myHallPlace(s), urgent: true };
+    case "hygiene":
+      return { text: `You need a bath — head to ${hall}`, place: myHallPlace(s), urgent: true };
+    case "fun":
+      return { text: "You need a break — unwind at the Lagoon Front", place: "lagoon", urgent: true };
+    case "social":
+      return { text: `You're lonely — gist with your roommates at ${hall}`, place: myHallPlace(s), urgent: true };
+  }
+}
 
 export function objectiveFor(s: SaveState): Objective {
   const low = (Object.keys(s.needs) as NeedKey[]).filter((k) => s.needs[k] < 15).sort((a, b) => s.needs[a] - s.needs[b]);
-  if (low.length) return NEED_FIX[low[0]];
+  if (low.length) return needFix(low[0], s);
 
   const u = s.uni;
   if (u.status === "applicant") {
@@ -26,7 +35,12 @@ export function objectiveFor(s: SaveState): Objective {
       : { text: `Pay your ${naira(ECONOMY.acceptanceFee)} acceptance fee at the Senate Building`, place: "senate" };
   }
   if (u.status === "graduate") {
-    return { text: "You're a UNILAG graduate! Yaba and the wider city open in a later update", place: null };
+    return s.job
+      ? { text: "Work your shifts from the Main Gate (Mon – Fri, 7 – 10 AM) — a better degree class pays more", place: "mainGate" }
+      : { text: "You're a UNILAG graduate! Find a job on the Careers board at the Senate Building", place: "senate" };
+  }
+  if (u.strikeUntil && s.time < u.strikeUntil) {
+    return { text: "ASUU is on strike 🪧 — no classes for now. Hustle, gist, or attend an SUG rally", place: "sub" };
   }
   if (u.paidLevel < u.level) {
     if (s.money < ECONOMY.schoolFees) {
@@ -40,16 +54,17 @@ export function objectiveFor(s: SaveState): Objective {
   if (u.readyToGraduate) return { text: "All exams done! Attend convocation at the Senate Building", place: "senate" };
 
   const dept = DEPTS[u.dept];
+  const faculty = FACULTIES[dept.faculty];
   const sem = u.semester === 1 ? "first" : "second";
   if (u.classes < ACADEMICS.minClasses) {
     return {
-      text: `Attend lectures for ${levelLabel(u.level)} ${sem} semester (${u.classes}/${ACADEMICS.minClasses})`,
-      place: "lectures",
+      text: `Attend lectures at the ${faculty.name} for ${levelLabel(u.level)} ${sem} semester (${u.classes}/${ACADEMICS.minClasses}) — GST counts too`,
+      place: myFacultyPlace(s),
     };
   }
   const wait = examOpensIn(s);
   if (wait > 0) {
     return { text: `Exams open in ${durationLabel(wait)} — prep at the Library (prep ${u.prep}/${ACADEMICS.maxPrep})`, place: "library" };
   }
-  return { text: `Write your ${dept.code} ${u.level}0${u.semester} exam at the Lecture Theatres`, place: "lectures" };
+  return { text: `Write your ${dept.code} ${u.level}0${u.semester} exam at the ${faculty.name}`, place: myFacultyPlace(s) };
 }
